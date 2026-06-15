@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import time
-import plotly.express as px
 from nba_api.stats.static import players
 from nba_api.stats.endpoints import playercareerstats, playergamelog
 
@@ -55,7 +54,6 @@ search_term = st.text_input("Search Player Name (e.g., Michael Jordan, LeBron Ja
 selected_player = None
 if search_term.strip():
     all_players = players.get_players()
-    # Case-insensitive substring match
     matched_players = [p for p in all_players if search_term.lower() in p['full_name'].lower()]
     
     log_debug(f"Search initiated for term: '{search_term}'", f"Found {len(matched_players)} matches.")
@@ -81,7 +79,6 @@ def fetch_player_playoff_seasons(player_id, player_name):
         log_debug(f"Requesting PlayerCareerStats for {player_name} (ID: {player_id})")
         career = playercareerstats.PlayerCareerStats(player_id=player_id, headers=HEADERS, timeout=15)
         
-        # Safely try accessing the post-season dataframe attribute
         try:
             df_post = career.season_totals_post_season.get_data_frame()
             log_debug("Successfully retrieved 'season_totals_post_season' attribute.")
@@ -131,13 +128,12 @@ def aggregate_career_playoff_logs(player_id, player_name, seasons):
             df = gamelog.get_data_frames()[0]
             
             if not df.empty:
-                df['SEASON_YEAR'] = season  # Inject human-readable season key
+                df['SEASON_YEAR'] = season  
                 master_logs.append(df)
                 log_debug(f"Season {season} complete. Extracted {len(df)} games.")
             else:
                 log_debug(f"Season {season} returned zero valid game rows.")
                 
-            # Graceful pacing to comply with stats.nba.com security throttling
             time.sleep(0.6)
             
         except Exception as season_err:
@@ -162,25 +158,21 @@ if selected_player:
     p_id = selected_player['id']
     p_name = selected_player['full_name']
     
-    # Step 1: Discover valid playoff seasons
     playoff_seasons, raw_career_df = fetch_player_playoff_seasons(p_id, p_name)
     
     if not playoff_seasons:
         st.warning(f"No historical playoff records located under this profile structure. {p_name} has no recorded career NBA postseason appearances.")
     else:
-        # Step 2: Extract historical playoff game logs
         with st.spinner(f"Connecting to API to assemble career postseason log for {p_name}..."):
             playoff_df = aggregate_career_playoff_logs(p_id, p_name, playoff_seasons)
             
         if playoff_df.empty:
             st.error("The API successfully acknowledged the profile's postseason entries, but individual game logs failed to return valid data sheets.")
         else:
-            # Data Cleaning layer to handle historical tracking discrepancies safely
             for col in ['PTS', 'AST', 'REB', 'STL', 'BLK', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'MIN']:
                 if col in playoff_df.columns:
                     playoff_df[col] = pd.to_numeric(playoff_df[col], errors='coerce').fillna(0)
             
-            # Derive meta metrics
             if 'MATCHUP' in playoff_df.columns:
                 playoff_df['OPPONENT'] = playoff_df['MATCHUP'].apply(lambda x: x.split(' ')[-1])
                 playoff_df['LOCATION'] = playoff_df['MATCHUP'].apply(lambda x: 'Away' if '@' in x else 'Home')
@@ -193,7 +185,6 @@ if selected_player:
             losses = total_games - wins
             win_pct = (wins / total_games) * 100 if total_games > 0 else 0
             
-            # High-level analytical overview metrics
             st.header(f"📊 {p_name} Postseason Career Analytics")
             
             m1, m2, m3, m4 = st.columns(4)
@@ -202,14 +193,12 @@ if selected_player:
             m3.metric("Playoff Win Percentage", f"{win_pct:.1f}%")
             m4.metric("Career Playoff PPG", f"{playoff_df['PTS'].mean():.1f}" if 'PTS' in playoff_df.columns else "N/A")
             
-            # Tabbed Layout Layout
             tab1, tab2, tab3 = st.tabs(["🔥 Complete Performance Log", "🎯 Series & Opponent Analysis", "📈 Statistical Trajectories"])
             
             with tab1:
                 st.subheader("Interactive Career Playoff Logs Explorer")
                 st.markdown("Filter, sort, and look up every post-season game row recorded inside the API structure.")
                 
-                # Interactive filter layout
                 f_cols = st.columns(3)
                 with f_cols[0]:
                     season_filter = st.multiselect("Filter Seasons:", options=sorted(playoff_df['SEASON_YEAR'].unique()))
@@ -231,7 +220,6 @@ if selected_player:
             with tab2:
                 st.subheader("Postseason Performance Breakdowns by Matchup Team")
                 
-                # Group stats to identify records against explicit opponents
                 if 'OPPONENT' in playoff_df.columns:
                     opp_stats = playoff_df.groupby('OPPONENT').agg(
                         Games=('GAME_ID', 'count'),
@@ -242,27 +230,23 @@ if selected_player:
                     
                     st.dataframe(opp_stats.sort_values(by='Games', ascending=False), use_container_width=True)
                     
-                    fig_opp = px.bar(opp_stats, x='OPPONENT', y='PPG', title=f"Average Points Scored per Game vs Opponents", color='Games', labels={'PPG': 'Points Per Game', 'OPPONENT': 'Opponent Abbreviation'})
-                    st.plotly_chart(fig_opp, use_container_width=True)
+                    # Native Streamlit Bar Chart (Replaced Plotly)
+                    st.markdown("#### Average Points Scored per Game vs Opponents")
+                    chart_data = opp_stats.set_index('OPPONENT')[['PPG']]
+                    st.bar_chart(chart_data, use_container_width=True)
                     
             with tab3:
                 st.subheader("Playoff Scoring Trajectory Across Career Timeline")
                 if 'GAME_DATE' in playoff_df.columns and 'PTS' in playoff_df.columns:
-                    # Sort oldest to newest for clear visual flow
                     trajectory_df = playoff_df.copy()
                     if 'SEASON_YEAR' in trajectory_df.columns:
                         trajectory_df = trajectory_df.sort_values(by=['SEASON_YEAR', 'GAME_ID'], ascending=[True, True])
                     trajectory_df['Career Game #'] = range(1, len(trajectory_df) + 1)
                     
-                    fig_traj = px.line(
-                        trajectory_df, 
-                        x='Career Game #', 
-                        y='PTS', 
-                        hover_data=['SEASON_YEAR', 'MATCHUP', 'PTS', 'WL'],
-                        title=f"{p_name} Game-by-Game Scoring Evolution",
-                        labels={'PTS': 'Points Scored'}
-                    )
-                    st.plotly_chart(fig_traj, use_container_width=True)
+                    # Native Streamlit Line Chart (Replaced Plotly)
+                    st.markdown(f"#### {p_name} Game-by-Game Scoring Evolution")
+                    line_data = trajectory_df.set_index('Career Game #')[['PTS']]
+                    st.line_chart(line_data, use_container_width=True)
 
 # ---------------------------------------------------------
 # SYSTEM DEVELOPER DEBUG CONSOLE
