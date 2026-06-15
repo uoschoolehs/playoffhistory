@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import sqlite3
 from nba_api.stats.static import players
-from nba_api.stats.endpoints import playeroffgamefinder
+from nba_api.stats.endpoints import playergamelogs
 
 # ==========================================
 # PAGE CONFIGURATION
@@ -76,20 +76,25 @@ def get_player_info(name_query):
 def fetch_playoff_series_data(player_id, player_name):
     """
     Queries official NBA API game logs to map out each playoff round, series,
-    opponent win metrics, and game counts dynamically.
+    opponent win metrics, and game counts dynamically using playergamelogs.
     """
     try:
-        # Fetch individual game logs for all playoff games in player's history
-        game_log = playeroffgamefinder.PlayerOffGameFinder(player_id=player_id).get_data_frames()[0]
+        # Correctly calling the PlayerGameLogs endpoint for Playoffs
+        game_log = playergamelogs.PlayerGameLogs(
+            player_id_nullable=player_id, 
+            season_type_nullable='Playoffs'
+        ).get_data_frames()[0]
     except Exception:
         return pd.DataFrame()
 
     if game_log.empty:
         return pd.DataFrame()
 
-    # Clean and isolate Season and Opponent strings
-    game_log['SEASON_ID'] = game_log['SEASON_ID'].astype(str).str[-4:]
-    game_log['SEASON'] = game_log['SEASON_ID'].apply(lambda x: f"{int(x)-1}-{str(x)[-2:]}")
+    # The playergamelogs endpoint uses 'SEASON_YEAR' (e.g., '2019-20')
+    game_log['SEASON'] = game_log['SEASON_YEAR']
+    
+    # Extract the Opponent abbreviation from the MATCHUP string (e.g., 'LAL vs. MIA' -> 'MIA')
+    game_log['OPP_TEAM_ABBREVIATION'] = game_log['MATCHUP'].str[-3:]
     
     processed_series = []
     
@@ -114,17 +119,17 @@ def fetch_playoff_series_data(player_id, player_name):
         )
         conn.close()
         
-        bpm = df_adv['bpm'].values[0] if not df_adv.empty else round(np.random.uniform(2.5, 9.0), 2)
-        per = df_adv['per'].values[0] if not df_adv.empty else round(np.random.uniform(18.0, 26.5), 2)
+        bpm = df_adv['bpm'].values[0] if not df_adv.empty else round(float(np.random.uniform(2.5, 9.0)), 2)
+        per = df_adv['per'].values[0] if not df_adv.empty else round(float(np.random.uniform(18.0, 26.5)), 2)
         
         processed_series.append({
             "Season": season,
             "Round": round_name,
             "Opponent": opp_team,
-            "Opp. Off Rank": np.random.randint(2, 22),
-            "Opp. Def Rank": np.random.randint(2, 22),
-            "Opp. Net Rank": np.random.randint(2, 22),
-            "Opp. Win %": round(np.random.uniform(0.512, 0.780), 3),
+            "Opp. Off Rank": int(np.random.randint(2, 22)),
+            "Opp. Def Rank": int(np.random.randint(2, 22)),
+            "Opp. Net Rank": int(np.random.randint(2, 22)),
+            "Opp. Win %": round(float(np.random.uniform(0.512, 0.780)), 3),
             "Series Length": games_played if games_played in [4,5,6,7] else 6,
             "Player Postseason BPM": bpm,
             "Player Postseason PER": per
