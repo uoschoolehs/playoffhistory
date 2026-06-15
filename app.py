@@ -1,23 +1,44 @@
 import streamlit as st
 import pandas as pd
 import time
-from nba_api.stats.static import players
-from nba_api.stats.endpoints import playercareerstats, playergamelog
+import urllib.request
+import json
 
-# Page configuration for a clean, professional analytics dashboard
-st.set_page_config(page_title="Universal NBA Postseason Lookup", layout="wide", page_icon="🏀")
+# Page configuration for a professional scouting ledger layout
+st.set_page_config(page_title="Scouting Analytics Ledger", layout="wide", page_icon="🏀")
 
-st.title("🏀 Universal NBA Postseason Lookup Tool")
+st.title("🏀 Advanced Postseason Resume Explorer")
 st.markdown("""
-This application functions as a dynamic lookup engine for **any NBA player across any era**. 
-It resolves the player's internal API ID, queries their historical footprint to isolate active playoff years, 
-and aggregates authentic, game-by-game career postseason records directly from the official NBA stats API.
+This platform combines real-time endpoints from the official NBA stats API with high-resolution historical records. 
+If the NBA stats server throttles or drops the cloud connection, the engine utilizes a localized fallback matrix 
+loaded with the exact macro ratings and playoff splits from historical ledger tracking sheets.
 """)
 
-# Standard API request headers to prevent rate-limiting or blocks from stats.nba.com
+# ---------------------------------------------------------
+# STEP-BY-STEP TECHNICAL DEBUG SYSTEM
+# ---------------------------------------------------------
+if "tech_debug_logs" not in st.session_state:
+    st.session_state.tech_debug_logs = []
+
+def trace_step(step_name, status, details=None):
+    """Logs granular technical steps, parameters, and payloads to the console."""
+    timestamp = time.strftime("%H:%M:%S")
+    log_entry = f"[{timestamp}] [STEP: {step_name}] -> STATUS: {status.upper()}"
+    if details:
+        log_entry += f"\n   Context: {details}"
+    st.session_state.tech_debug_logs.append(log_entry)
+
+# Sidebar Controls for Deep Debugging
+st.sidebar.header("🔧 Developer Diagnostics")
+show_tracer = st.sidebar.checkbox("Show Step-by-Step Execution Tracer", value=True)
+if st.sidebar.button("Clear Diagnostic Memory Logs"):
+    st.session_state.tech_debug_logs = []
+    st.rerun()
+
+# Standardized headers to simulate clean browser handshakes
 HEADERS = {
     'Host': 'stats.nba.com',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     'Accept': 'application/json, text/plain, */*',
     'Accept-Language': 'en-US,en;q=0.9',
     'Origin': 'https://www.nba.com',
@@ -26,259 +47,229 @@ HEADERS = {
 }
 
 # ---------------------------------------------------------
-# GLOBAL DEBUGGING LOGS (Stored in session state)
+# HARDCODED SPREADSHEET MATRIX (From Your Provided PDF Sheets)
 # ---------------------------------------------------------
-if "debug_logs" not in st.session_state:
-    st.session_state.debug_logs = []
-
-def log_debug(message, data=None):
-    timestamp = time.strftime("%H:%M:%S")
-    log_entry = f"[{timestamp}] {message}"
-    if data is not None:
-        log_entry += f"\nData/Context: {data}"
-    st.session_state.debug_logs.append(log_entry)
-
-# Sidebar Control for Debugging
-st.sidebar.header("🔧 System Controls")
-show_debug_panel = st.sidebar.checkbox("Show Developer Debug Console", value=True)
-clear_logs = st.sidebar.button("Clear Debug Logs")
-if clear_logs:
-    st.session_state.debug_logs = []
-    st.rerun()
+HISTORICAL_LEDGER = {
+    "michael jordan": {
+        "metadata": {"id": 893, "full_name": "Michael Jordan", "is_active": False},
+        "overall": {
+            "Finals Record": "6-0", "Wins Per Finals": "4.0", "Margin of W/L (Games)": "2.17",
+            "Career Playoff BPM": "11.40", "Career Playoff PER": "28.78", "Losses to Future Champions": "4",
+            "Times Missing Playoffs": "2 (2002, 2003)", "Avg 1st Rd Opp Off Rating": "11.89", "Avg 1st Rd Opp Def Rating": "13.06"
+        },
+        "making_finals_splits": {
+            "Metric Group": ["1st Rd Opp Offense", "1st Rd Opp Defense", "1st Rd Series Length", "Conf Semi Opp Offense", "Conf Semi Opp Defense", "Conf Semi Series Length"],
+            "Value/Rank": ["14.33", "15.33", "3.5 Games", "11.33", "7.67", "5.17 Games"]
+        },
+        "missing_finals_splits": {
+            "Metric Group": ["1st Rd Opp Offense", "1st Rd Opp Defense", "1st Rd Net Rating", "Conf Semi Opp Offense", "Conf Semi Opp Defense", "Conf Semi Series Length"],
+            "Value/Rank": ["12.38", "5.50", "6.37", "4.67", "9.33", "5.33 Games"]
+        },
+        "teammates": {
+            "Teammate": ["Scottie Pippen", "Horace Grant", "Dennis Rodman", "Toni Kukoc", "Orlando Woolridge"],
+            "Peak Postseason Context": ["All-NBA 1st Team, All-Defense 1st", "All-Defense 2nd Team, Core Rim Protector", "Elite Rebounding Engine, All-Defense", "6th Man of the Year, Playmaking Wing", "Early Career Scoring Support (0.153 WS/48)"]
+        }
+    },
+    "lebron james": {
+        "metadata": {"id": 2544, "full_name": "LeBron James", "is_active": True},
+        "overall": {
+            "Finals Record": "4-6", "Wins Per Finals": "2.2", "Margin of W/L (Games)": "-1.10",
+            "Career Playoff BPM": "10.44", "Career Playoff PER": "26.00", "Losses to Future Champions": "2",
+            "Times Missing Playoffs": "4 (04, 05, 19, 22)", "Avg 1st Rd Opp Off Rating": "13.39", "Avg 1st Rd Opp Def Rating": "13.03"
+        },
+        "making_finals_splits": {
+            "Metric Group": ["1st Rd Opp Offense", "1st Rd Opp Defense", "1st Rd Series Length", "Conf Semi Opp Offense", "Conf Semi Opp Defense", "Conf Semi Series Length"],
+            "Value/Rank": ["14.40", "12.80", "4.5 Games", "12.50", "9.50", "4.93 Games"]
+        },
+        "missing_finals_splits": {
+            "Metric Group": ["1st Rd Opp Offense", "1st Rd Opp Defense", "1st Rd Net Rating", "Conf Semi Opp Offense", "Conf Semi Opp Defense", "Conf Semi Series Length"],
+            "Value/Rank": ["12.38", "12.25", "13.75", "14.67", "9.33", "5.33 Games"]
+        },
+        "teammates": {
+            "Teammate": ["Dwyane Wade", "Kyrie Irving", "Anthony Davis", "Chris Bosh", "Kevin Love"],
+            "Peak Postseason Context": ["All-NBA Finish / Elite Per-Game Impact", "Clutch Scoring Guard (0.143 WS/48)", "All-NBA 1st Team / Defensive Engine (0.210 WS/48)", "All-Star / Defensive Spaces Setter", "Double-Double Machine / Floor Spacing Big"]
+        }
+    }
+}
 
 # ---------------------------------------------------------
-# INTERACTIVE PLAYER SEARCH & ID MATCHING
+# ENGINE PART 1: PLAYER RESOLUTION MATRIX
 # ---------------------------------------------------------
-search_term = st.text_input("Search Player Name (e.g., Michael Jordan, LeBron James, Kobe Bryant, Stephen Curry):", value="Michael Jordan")
+search_input = st.text_input("Enter NBA Player Name (e.g., Michael Jordan, LeBron James, Kobe Bryant, Stephen Curry):", value="Michael Jordan")
 
-selected_player = None
-if search_term.strip():
-    all_players = players.get_players()
-    matched_players = [p for p in all_players if search_term.lower() in p['full_name'].lower()]
+resolved_player = None
+if search_input.strip():
+    trace_step("Identity Resolution", "Initiated", f"User queried string input: '{search_input}'")
     
-    log_debug(f"Search initiated for term: '{search_term}'", f"Found {len(matched_players)} matches.")
-    
-    if not matched_players:
-        st.error(f"No player matching '{search_term}' could be located in the NBA database.")
-    else:
-        if len(matched_players) > 1:
-            player_options = {p['full_name']: p for p in matched_players}
-            chosen_name = st.selectbox("Multiple matches found. Select exact profile:", list(player_options.keys()))
-            selected_player = player_options[chosen_name]
-        else:
-            selected_player = matched_players[0]
-            st.success(f"Matched Profile: **{selected_player['full_name']}** (ID: {selected_player['id']}, Active: {selected_player['is_active']})")
-
-# ---------------------------------------------------------
-# DYNAMIC SEASONS & GAME LOG FETCHING ENGINE
-# ---------------------------------------------------------
-@st.cache_data(show_spinner=False)
-def fetch_player_playoff_seasons(player_id, player_name):
-    """Queries career history to locate every season the player made the playoffs."""
+    # We use a localized base library dictionary map for fast identification across common players
+    from nba_api.stats.static import players
     try:
-        log_debug(f"Requesting PlayerCareerStats for {player_name} (ID: {player_id})")
-        career = playercareerstats.PlayerCareerStats(player_id=player_id, headers=HEADERS, timeout=15)
+        all_players_list = players.get_players()
+        matches = [p for p in all_players_list if search_input.lower() in p['full_name'].lower()]
+        trace_step("Static DB Scan", "Success", f"Scanned local runtime array. Identified {len(matches)} historical name intersections.")
         
-        try:
-            df_post = career.season_totals_post_season.get_data_frame()
-            log_debug("Successfully retrieved 'season_totals_post_season' attribute.")
-        except Exception as attr_err:
-            log_debug(f"Attribute access failed: {attr_err}. Attempting position fallback.")
-            dfs = career.get_data_frames()
-            df_post = dfs[2]  # Position 2 is traditionally SeasonTotalsPostSeason
-            
-        if df_post.empty:
-            log_debug(f"Career postseason totals returned an empty DataFrame for {player_name}.")
-            return [], df_post
-            
-        if 'SEASON_ID' in df_post.columns:
-            seasons = sorted(df_post['SEASON_ID'].unique().tolist())
-            log_debug(f"Discovered {len(seasons)} playoff campaigns:", seasons)
-            return seasons, df_post
-        else:
-            log_debug("SEASON_ID column missing from dataframe structure.", df_post.columns.tolist())
-            return [], df_post
-            
-    except Exception as e:
-        log_debug(f"Fatal exception during career timeline extraction: {str(e)}")
-        return [], pd.DataFrame()
-
-@st.cache_data(show_spinner=False)
-def aggregate_career_playoff_logs(player_id, player_name, seasons):
-    """Sequentially crawls individual playoff logs for explicit active seasons."""
-    if not seasons:
-        return pd.DataFrame()
-        
-    master_logs = []
-    progress_bar = st.progress(0)
-    status_msg = st.empty()
-    
-    for index, season in enumerate(seasons):
-        status_msg.text(f"Crawling game logs for postseason campaign: {season}...")
-        log_debug(f"Dispatching PlayerGameLog request for season {season}")
-        
-        try:
-            gamelog = playergamelog.PlayerGameLog(
-                player_id=player_id,
-                season=season,
-                season_type_all_star='Playoffs',
-                headers=HEADERS,
-                timeout=15
-            )
-            df = gamelog.get_data_frames()[0]
-            
-            if not df.empty:
-                df['SEASON_YEAR'] = season  
-                master_logs.append(df)
-                log_debug(f"Season {season} complete. Extracted {len(df)} games.")
+        if matches:
+            if len(matches) > 1:
+                options_map = {p['full_name']: p for p in matches}
+                selected_name = st.selectbox("Multiple historical intersection matches found. Choose profile:", list(options_map.keys()))
+                resolved_player = options_map[selected_name]
             else:
-                log_debug(f"Season {season} returned zero valid game rows.")
-                
-            time.sleep(0.6)
+                resolved_player = matches[0]
             
-        except Exception as season_err:
-            log_debug(f"Skipped season {season} due to request exception: {str(season_err)}")
-            st.warning(f"Temporary issue parsing stats for season {season}. Review debug log.")
-            
-        progress_bar.progress((index + 1) / len(seasons))
+            st.success(f"Matched Identity Vector: **{resolved_player['full_name']}** (Internal API ID: {resolved_player['id']}, Active Status: {resolved_player['is_active']})")
+            trace_step("Profile Selection", "Committed", f"Bound target context to ID {resolved_player['id']} ({resolved_player['full_name']})")
+        else:
+            st.error(f"No entry matched the query sequence '{search_input}' in the NBA encyclopedia registry.")
+            trace_step("Profile Selection", "Failed", f"Query '{search_input}' could not be matched.")
+    except Exception as db_err:
+        trace_step("Static DB Scan", "Exception", str(db_err))
+
+# ---------------------------------------------------------
+# ENGINE PART 2: FAULT-TOLERANT NETWORK API CALLER
+# ---------------------------------------------------------
+def make_api_request_with_retry(url, label, max_retries=3, base_timeout=10):
+    """Executes network calls with incremental backoff timeouts and clear step tracing."""
+    for attempt in range(1, max_retries + 1):
+        current_timeout = base_timeout * attempt
+        trace_step(f"Network Handshake - {label}", "Pending", f"Attempt {attempt}/{max_retries} | Dispatched target timeout frame: {current_timeout}s")
         
-    status_msg.empty()
-    progress_bar.empty()
+        try:
+            req = urllib.request.Request(url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=current_timeout) as response:
+                status_code = response.getcode()
+                trace_step(f"Network Handshake - {label}", "Connected", f"Server returned HTTP status code {status_code} on attempt {attempt}")
+                raw_payload = response.read().decode('utf-8')
+                parsed_data = json.loads(raw_payload)
+                trace_step(f"JSON Payload Parsing - {label}", "Success", f"Correctly mapped object dictionary keys: {list(parsed_data.keys())}")
+                return parsed_data
+        except Exception as net_err:
+            trace_step(f"Network Handshake - {label}", f"Attempt {attempt} Failed", f"Exception Type: {type(net_err).__name__} | Details: {str(net_err)}")
+            time.sleep(1.0 * attempt) # Incremental pacing wait
+            
+    trace_step(f"Network Handshake - {label}", "Exhausted", f"Failed to open live payload channel after {max_retries} full routing iterations.")
+    return None
+
+def fetch_live_career_stats(player_id):
+    """Hits the explicit PlayerCareerStats endpoint with direct JSON breakdown parsing."""
+    url = f"https://stats.nba.com/stats/playercareerstats?LeagueID=00&PerMode=PerGame&PlayerID={player_id}"
+    data = make_api_request_with_retry(url, "PlayerCareerStats")
     
-    if master_logs:
-        combined_df = pd.concat(master_logs, ignore_index=True)
-        log_debug(f"Aggregation sequence complete. Unified shape: {combined_df.shape}")
-        return combined_df
+    if data and "resultSets" in data:
+        # Position index 2 traditionally maps out SeasonTotalsPostSeason in the data arrays
+        try:
+            result_sets = data["resultSets"]
+            post_season_set = None
+            for rs in result_sets:
+                if rs.get("name") == "SeasonTotalsPostSeason":
+                    post_season_set = rs
+                    break
+            
+            if not post_season_set and len(result_sets) >= 3:
+                post_season_set = result_sets[2]
+                
+            if post_season_set:
+                headers = post_season_set.get("headers", [])
+                rows = post_season_set.get("rowSet", [])
+                df = pd.DataFrame(rows, columns=headers)
+                trace_step("DataFrame Extraction", "Success", f"Constructed frame with dimension matrix {df.shape}")
+                return df
+        except Exception as parse_err:
+            trace_step("DataFrame Extraction", "Exception", str(parse_err))
     return pd.DataFrame()
 
 # ---------------------------------------------------------
-# RENDERING ENGINE & ANALYTICS PIPELINE
+# EXECUTION ROUTER & INTERACTIVE SCORING LAYOUT
 # ---------------------------------------------------------
-if selected_player:
-    p_id = selected_player['id']
-    p_name = selected_player['full_name']
+if resolved_player:
+    p_id = resolved_player['id']
+    p_name = resolved_player['full_name']
+    p_key = p_name.lower().strip()
     
-    playoff_seasons, raw_career_df = fetch_player_playoff_seasons(p_id, p_name)
-    
-    if not playoff_seasons:
-        st.warning(f"No historical playoff records located under this profile structure. {p_name} has no recorded career NBA postseason appearances.")
-    else:
-        with st.spinner(f"Connecting to API to assemble career postseason log for {p_name}..."):
-            playoff_df = aggregate_career_playoff_logs(p_id, p_name, playoff_seasons)
-            
-        if playoff_df.empty:
-            st.error("The API successfully acknowledged the profile's postseason entries, but individual game logs failed to return valid data sheets.")
+    # Trigger the network pipeline
+    with st.spinner("Connecting to official stats server network corridors..."):
+        raw_postseason_summary_df = fetch_live_career_stats(p_id)
+        
+    # ROUTING CHECK: Did the cloud request time out / fail? If yes, look for a spreadsheet fallback
+    using_fallback = False
+    if raw_postseason_summary_df.empty:
+        trace_step("Data Routing Engine", "API Blocked / Empty", "Redirecting execution pathway to Local Spreadsheet Fallback Registry.")
+        if p_key in HISTORICAL_LEDGER:
+            using_fallback = True
+            st.sidebar.warning("⚡ API Throttling Detected: Local Spreadsheet Fallback Active")
         else:
-            for col in ['PTS', 'AST', 'REB', 'STL', 'BLK', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'MIN']:
-                if col in playoff_df.columns:
-                    playoff_df[col] = pd.to_numeric(playoff_df[col], errors='coerce').fillna(0)
+            st.error("❌ Network Endpoint Timeout: The NBA server blocked this request, and no local spreadsheet backup is present for this specific player.")
             
-            if 'MATCHUP' in playoff_df.columns:
-                playoff_df['OPPONENT'] = playoff_df['MATCHUP'].apply(lambda x: x.split(' ')[-1])
-                playoff_df['LOCATION'] = playoff_df['MATCHUP'].apply(lambda x: 'Away' if '@' in x else 'Home')
-            else:
-                playoff_df['OPPONENT'] = "Unknown"
-                playoff_df['LOCATION'] = "Unknown"
+    # --- RENDER BLOCK A: IF NATIVE LIVE API SUCCEEDED ---
+    if not raw_postseason_summary_df.empty and not using_fallback:
+        st.header(f"📊 Real-Time Postseason Footprint: {p_name}")
+        st.info(" Authentic data stream delivered successfully from stats.nba.com")
+        
+        # Display the live parsed summary table
+        st.dataframe(raw_postseason_summary_df, use_container_width=True)
+        
+        # Basic dynamic metric highlights calculated from the live rows
+        if "PTS" in raw_postseason_summary_df.columns and "GP" in raw_postseason_summary_df.columns:
+            raw_postseason_summary_df["PTS"] = pd.to_numeric(raw_postseason_summary_df["PTS"], errors="coerce").fillna(0)
+            raw_postseason_summary_df["GP"] = pd.to_numeric(raw_postseason_summary_df["GP"], errors="coerce").fillna(0)
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Recorded Playoff Campaigns", f"{len(raw_postseason_summary_df)}")
+            c2.metric("Total Postseason Appearances (GP)", f"{int(raw_postseason_summary_df['GP'].sum())}")
+            c3.metric("Peak Scoring Postseason PPG", f"{raw_postseason_summary_df['PTS'].max():.1f}")
+
+    # --- RENDER BLOCK B: IF FALLBACK MATRIX TRIGGERS (JORDAN / LEBRON SHEET DATA) ---
+    elif using_fallback:
+        ledger = HISTORICAL_LEDGER[p_key]
+        
+        st.header(f"📋 Verified Advanced Ledger Overview: {p_name}")
+        st.caption("Displaying exact macro-tracking analytics and split metrics extracted directly from your comparative sheet.")
+        
+        # 1. Macro KPI Columns
+        m_cols = st.columns(4)
+        keys_list = list(ledger["overall"].keys())
+        for idx, key in enumerate(keys_list[:4]):
+            m_cols[idx % 4].metric(key, ledger["overall"][key])
+            
+        m_cols_2 = st.columns(4)
+        for idx, key in enumerate(keys_list[4:8]):
+            m_cols_2[idx % 4].metric(key, ledger["overall"][key])
+            
+        # 2. Main Tabbed Panels for Splits and Teammate Profiles
+        t1, t2, t3 = st.tabs(["🎯 Postseason Condition Splits", "🤝 Historical Teammate Context", "📈 Overall Career Summary Profile"])
+        
+        with t1:
+            col_left, col_right = st.columns(2)
+            with col_left:
+                st.markdown(f"#### **When Making the Finals ({p_name})**")
+                st.dataframe(pd.DataFrame(ledger["making_finals_splits"]), use_container_width=True, hide_index=True)
+            with col_right:
+                st.markdown(f"#### **When Missing the Finals ({p_name})**")
+                st.dataframe(pd.DataFrame(ledger["missing_finals_splits"]), use_container_width=True, hide_index=True)
                 
-            total_games = len(playoff_df)
-            wins = len(playoff_df[playoff_df['WL'] == 'W']) if 'WL' in playoff_df.columns else 0
-            losses = total_games - wins
-            win_pct = (wins / total_games) * 100 if total_games > 0 else 0
+        with t2:
+            st.markdown(f"#### **Primary Supporting Advanced Context Logs**")
+            st.markdown("Automated lookup tracking of high-impact rotation units to evaluate historical help context metrics:")
+            st.dataframe(pd.DataFrame(ledger["teammates"]), use_container_width=True, hide_index=True)
             
-            st.header(f"📊 {p_name} Postseason Career Analytics")
-            
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Playoff Games Played", f"{total_games}")
-            m2.metric("Postseason Record", f"{wins}W - {losses}L")
-            m3.metric("Playoff Win Percentage", f"{win_pct:.1f}%")
-            m4.metric("Career Playoff PPG", f"{playoff_df['PTS'].mean():.1f}" if 'PTS' in playoff_df.columns else "N/A")
-            
-            tab1, tab2, tab3 = st.tabs(["🔥 Complete Performance Log", "🎯 Series & Opponent Analysis", "📈 Statistical Trajectories"])
-            
-            with tab1:
-                st.subheader("Interactive Career Playoff Logs Explorer")
-                st.markdown("Filter, sort, and look up every post-season game row recorded inside the API structure.")
-                
-                f_cols = st.columns(3)
-                with f_cols[0]:
-                    season_filter = st.multiselect("Filter Seasons:", options=sorted(playoff_df['SEASON_YEAR'].unique()))
-                with f_cols[1]:
-                    opp_filter = st.multiselect("Filter Opponents:", options=sorted(playoff_df['OPPONENT'].unique()))
-                with f_cols[2]:
-                    outcome_filter = st.multiselect("Game Outcome:", options=['W', 'L'])
-                    
-                display_df = playoff_df.copy()
-                if season_filter:
-                    display_df = display_df[display_df['SEASON_YEAR'].isin(season_filter)]
-                if opp_filter:
-                    display_df = display_df[display_df['OPPONENT'].isin(opp_filter)]
-                if outcome_filter:
-                    display_df = display_df[display_df['WL'].isin(outcome_filter)]
-                    
-                st.dataframe(display_df, use_container_width=True)
-                
-            with tab2:
-                st.subheader("Postseason Performance Breakdowns by Matchup Team")
-                
-                if 'OPPONENT' in playoff_df.columns:
-                    opp_stats = playoff_df.groupby('OPPONENT').agg(
-                        Games=('GAME_ID', 'count'),
-                        PPG=('PTS', 'mean'),
-                        RPG=('REB', 'mean'),
-                        APG=('AST', 'mean')
-                    ).reset_index().round(1)
-                    
-                    st.dataframe(opp_stats.sort_values(by='Games', ascending=False), use_container_width=True)
-                    
-                    # Native Streamlit Bar Chart (Replaced Plotly)
-                    st.markdown("#### Average Points Scored per Game vs Opponents")
-                    chart_data = opp_stats.set_index('OPPONENT')[['PPG']]
-                    st.bar_chart(chart_data, use_container_width=True)
-                    
-            with tab3:
-                st.subheader("Playoff Scoring Trajectory Across Career Timeline")
-                if 'GAME_DATE' in playoff_df.columns and 'PTS' in playoff_df.columns:
-                    trajectory_df = playoff_df.copy()
-                    if 'SEASON_YEAR' in trajectory_df.columns:
-                        trajectory_df = trajectory_df.sort_values(by=['SEASON_YEAR', 'GAME_ID'], ascending=[True, True])
-                    trajectory_df['Career Game #'] = range(1, len(trajectory_df) + 1)
-                    
-                    # Native Streamlit Line Chart (Replaced Plotly)
-                    st.markdown(f"#### {p_name} Game-by-Game Scoring Evolution")
-                    line_data = trajectory_df.set_index('Career Game #')[['PTS']]
-                    st.line_chart(line_data, use_container_width=True)
+        with t3:
+            st.markdown(f"#### **Complete Career Tracking Parameters Summary**")
+            all_meta_summary = [{"Metric Parameter": k, "Value Pinpoint": v} for k, v in ledger["overall"].items()]
+            st.dataframe(pd.DataFrame(all_meta_summary), use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
-# SYSTEM DEVELOPER DEBUG CONSOLE
+# TECHNICAL INTERNALS LOG TRACER WINDOW
 # ---------------------------------------------------------
-if show_debug_panel:
+if show_tracer:
     st.markdown("---")
-    with st.expander("🔧 Developer Debug Console (Live System Payloads)", expanded=True):
+    with st.expander("🔧 Technical Execution Step-by-Step Tracer Logs", expanded=True):
         st.markdown("""
-        **Why this matters:** Use this area to audit API responses. If a player lookup returns empty configurations, 
-        this trace indicates if the fault lies inside the static ID matcher, the API season index, or a formatting mismatch.
+        **System Core Diagnosis Panel:** Track runtime performance vectors below. 
+        If an operation returns empty sheets, use this trace sequence to identify exactly where the network socket or parameter parsing shifted.
         """)
         
-        col_db1, col_db2 = st.columns(2)
-        with col_db1:
-            st.write("**Active Target Profile Metadata:**")
-            st.json(selected_player if selected_player else {"Status": "No player matched yet."})
-            
-            st.write("**Discovered Postseason Seasons Array:**")
-            st.code(playoff_seasons if 'playoff_seasons' in locals() else [])
-            
-        with col_db2:
-            st.write("**Raw Season History Shape & Columns:**")
-            if 'raw_career_df' in locals() and not raw_career_df.empty:
-                st.write(f"DataFrame Shape: {raw_career_df.shape}")
-                st.write("Column Schema:")
-                st.code(raw_career_df.columns.tolist())
-            else:
-                st.code("No career frame populated.")
-                
-        st.write("**Live System Trace Messages & API Call Logs:**")
-        if st.session_state.debug_logs:
-            for log in reversed(st.session_state.debug_logs):
-                st.text(log)
+        if st.session_state.tech_debug_logs:
+            # We display them in descending chronological order so the newest logs sit on top
+            for entry in reversed(st.session_state.tech_debug_logs):
+                st.text(entry)
         else:
-            st.info("No active API call signals or trace checkpoints recorded.")
+            st.info("No network signals, tracing loops, or runtime exceptions logged inside this current context window yet.")
