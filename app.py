@@ -1,293 +1,300 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import sqlite3
+import time
+import plotly.express as px
 from nba_api.stats.static import players
-from nba_api.stats.endpoints import playergamelogs
+from nba_api.stats.endpoints import playercareerstats, playergamelog
 
-# ==========================================
-# PAGE CONFIGURATION
-# ==========================================
-st.set_page_config(page_title="NBA Playoff Resume Analyzer", layout="wide")
+# Page configuration for a clean, professional analytics dashboard
+st.set_page_config(page_title="Universal NBA Postseason Lookup", layout="wide", page_icon="🏀")
 
-# ==========================================
-# 1. DATABASE & CACHING LAYER (Local DB)
-# ==========================================
-def init_db():
-    """Initializes a local database to store historical advanced stats and award shares."""
-    conn = sqlite3.connect("nba_historical_data.db")
-    cursor = conn.cursor()
-    
-    # Table for Advanced Player Metrics per Postseason
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS player_advanced_postseason (
-            player_id TEXT, player_name TEXT, season TEXT, bpm REAL, per REAL
-        )
-    """)
-    
-    # Table for Teammate Seasons and Accolades
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS teammate_accolades (
-            player_name TEXT, teammate_name TEXT, season TEXT,
-            bpm REAL, per REAL, ws_48 REAL, accolades TEXT
-        )
-    """)
-    
-    # SEEDING MOCK HISTORICAL DATA FOR DEMONSTRATION
-    cursor.execute("SELECT COUNT(*) FROM player_advanced_postseason")
-    if cursor.fetchone()[0] == 0:
-        # Seeding baseline records directly from the provided manual PDF stats
-        cursor.executemany("""
-            INSERT INTO player_advanced_postseason VALUES (?, ?, ?, ?, ?)
-        """, [
-            ('2544', 'LeBron James', 'Career_Avg', 10.44, 28.0),
-            ('893', 'Michael Jordan', 'Career_Avg', 11.40, 28.78),
-            ('2544', 'LeBron James', '2012-13', 12.4, 28.1),
-            ('2544', 'LeBron James', '2015-16', 11.0, 27.5),
-            ('893', 'Michael Jordan', '1990-91', 14.4, 32.0),
-            ('893', 'Michael Jordan', '1995-96', 10.1, 26.7)
-        ])
-        
-        cursor.executemany("""
-            INSERT INTO teammate_accolades VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, [
-            ('LeBron James', 'Dwyane Wade', '2011-12', 4.5, 24.1, 0.180, 'All-NBA 3rd Team, All-Star'),
-            ('LeBron James', 'Kyrie Irving', '2015-16', 3.2, 21.4, 0.143, 'All-Star'),
-            ('LeBron James', 'Anthony Davis', '2019-20', 4.1, 25.0, 0.210, 'All-NBA 1st Team, All-Defense 1st'),
-            ('Michael Jordan', 'Scottie Pippen', '1991-92', 5.3, 21.5, 0.190, 'All-NBA 2nd Team, All-Defense 1st'),
-            ('Michael Jordan', 'Scottie Pippen', '1995-96', 4.9, 21.0, 0.185, 'All-NBA 1st Team, All-Defense 1st'),
-            ('Michael Jordan', 'Horace Grant', '1990-91', 2.5, 17.5, 0.140, 'Rotation Core')
-        ])
-        conn.commit()
-    conn.close()
-
-init_db()
-
-# ==========================================
-# 2. DATA ENGINES & STATS WRAPPERS
-# ==========================================
-@st.cache_data(show_spinner=False)
-def get_player_info(name_query):
-    nba_players = players.get_players()
-    match = [p for p in nba_players if name_query.lower() in p['full_name'].lower()]
-    return match[0] if match else None
-
-@st.cache_data(show_spinner=False)
-def fetch_playoff_series_data(player_id, player_name):
-    """
-    Queries official NBA API game logs to map out each playoff round, series,
-    opponent win metrics, and game counts dynamically using playergamelogs.
-    """
-    try:
-        # Correctly calling the PlayerGameLogs endpoint for Playoffs
-        game_log = playergamelogs.PlayerGameLogs(
-            player_id_nullable=player_id, 
-            season_type_nullable='Playoffs'
-        ).get_data_frames()[0]
-    except Exception:
-        return pd.DataFrame()
-
-    if game_log.empty:
-        return pd.DataFrame()
-
-    # The playergamelogs endpoint uses 'SEASON_YEAR' (e.g., '2019-20')
-    game_log['SEASON'] = game_log['SEASON_YEAR']
-    
-    # Extract the Opponent abbreviation from the MATCHUP string (e.g., 'LAL vs. MIA' -> 'MIA')
-    game_log['OPP_TEAM_ABBREVIATION'] = game_log['MATCHUP'].str[-3:]
-    
-    processed_series = []
-    
-    # Grouping logs into unique seasonal matchups to compute series lengths
-    grouped = game_log.groupby(['SEASON', 'OPP_TEAM_ABBREVIATION'])
-    for (season, opp_team), group in grouped:
-        games_played = len(group)
-        wins = len(group[group['WL'] == 'W'])
-        losses = len(group[group['WL'] == 'L'])
-        
-        # Approximate the playoff structure round
-        round_name = "1st Round"
-        if games_played >= 4:
-            if wins == 4 and processed_series and processed_series[-1]['Season'] == season:
-                round_name = "Conference Semis" 
-        
-        # Fetch underlying dynamic ratings stored or fallback to baseline averages
-        conn = sqlite3.connect("nba_historical_data.db")
-        df_adv = pd.read_sql_query(
-            "SELECT bpm, per FROM player_advanced_postseason WHERE player_id=? AND season=?", 
-            conn, params=(player_id, season)
-        )
-        conn.close()
-        
-        bpm = df_adv['bpm'].values[0] if not df_adv.empty else round(float(np.random.uniform(2.5, 9.0)), 2)
-        per = df_adv['per'].values[0] if not df_adv.empty else round(float(np.random.uniform(18.0, 26.5)), 2)
-        
-        processed_series.append({
-            "Season": season,
-            "Round": round_name,
-            "Opponent": opp_team,
-            "Opp. Off Rank": int(np.random.randint(2, 22)),
-            "Opp. Def Rank": int(np.random.randint(2, 22)),
-            "Opp. Net Rank": int(np.random.randint(2, 22)),
-            "Opp. Win %": round(float(np.random.uniform(0.512, 0.780)), 3),
-            "Series Length": games_played if games_played in [4,5,6,7] else 6,
-            "Player Postseason BPM": bpm,
-            "Player Postseason PER": per
-        })
-        
-    return pd.DataFrame(processed_series)
-
-# ==========================================
-# 3. STREAMLIT FRONTEND USER INTERFACE
-# ==========================================
-st.title("🏀 Deep-Dive NBA Playoff Resume Analyzer")
+st.title("🏀 Universal NBA Postseason Lookup Tool")
 st.markdown("""
-    This platform automates manual tracking from **basketball-reference.com**. 
-    Input any historic basketball player to calculate round-by-round opponent strengths, historical macro metrics, 
-    and detailed performance grids mirroring advanced scouting ledgers.
+This application functions as a dynamic lookup engine for **any NBA player across any era**. 
+It resolves the player's internal API ID, queries their historical footprint to isolate active playoff years, 
+and aggregates authentic, game-by-game career postseason records directly from the official NBA stats API.
 """)
 
-st.sidebar.header("Search Parameters")
-player_input = st.sidebar.text_input("Enter Player Name", "LeBron James")
+# Standard API request headers to prevent rate-limiting or blocks from stats.nba.com
+HEADERS = {
+    'Host': 'stats.nba.com',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Origin': 'https://www.nba.com',
+    'Referer': 'https://www.nba.com/',
+    'Connection': 'keep-alive'
+}
 
-if player_input:
-    player_profile = get_player_info(player_input)
+# ---------------------------------------------------------
+# GLOBAL DEBUGGING LOGS (Stored in session state)
+# ---------------------------------------------------------
+if "debug_logs" not in st.session_state:
+    st.session_state.debug_logs = []
+
+def log_debug(message, data=None):
+    timestamp = time.strftime("%H:%M:%S")
+    log_entry = f"[{timestamp}] {message}"
+    if data is not None:
+        log_entry += f"\nData/Context: {data}"
+    st.session_state.debug_logs.append(log_entry)
+
+# Sidebar Control for Debugging
+st.sidebar.header("🔧 System Controls")
+show_debug_panel = st.sidebar.checkbox("Show Developer Debug Console", value=True)
+clear_logs = st.sidebar.button("Clear Debug Logs")
+if clear_logs:
+    st.session_state.debug_logs = []
+    st.rerun()
+
+# ---------------------------------------------------------
+# INTERACTIVE PLAYER SEARCH & ID MATCHING
+# ---------------------------------------------------------
+search_term = st.text_input("Search Player Name (e.g., Michael Jordan, LeBron James, Kobe Bryant, Stephen Curry):", value="Michael Jordan")
+
+selected_player = None
+if search_term.strip():
+    all_players = players.get_players()
+    # Case-insensitive substring match
+    matched_players = [p for p in all_players if search_term.lower() in p['full_name'].lower()]
     
-    if player_profile:
-        st.sidebar.success(f"Matched: {player_profile['full_name']} (ID: {player_profile['id']})")
-        
-        with st.spinner("Analyzing historical matchups and API datalogs..."):
-            series_df = fetch_playoff_series_data(player_profile['id'], player_profile['full_name'])
-        
-        if not series_df.empty:
-            # Layout Tabs
-            tab1, tab2, tab3, tab4 = st.tabs([
-                "📊 Postseason Path", 
-                "🏆 Career Aggregates", 
-                "🤝 Teammate Context Engine", 
-                "⚙️ Database Admin Portal"
-            ])
-            
-            # --- TAB 1: POSTSEASON PATH ANALYSIS ---
-            with tab1:
-                st.subheader(f"Detailed Postseason Layout: {player_profile['full_name']}")
-                st.dataframe(series_df, use_container_width=True)
-                
-            # --- TAB 2: CAREER AGGREGATES & SPLITS ---
-            with tab2:
-                st.subheader("Macro Opponent Metrics & Playoff Summary")
-                
-                avg_bpm = round(series_df["Player Postseason BPM"].mean(), 2)
-                avg_per = round(series_df["Player Postseason PER"].mean(), 2)
-                
-                first_rd = series_df[series_df["Round"] == "1st Round"]
-                semi_rd = series_df[series_df["Round"] == "Conference Semis"]
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Overall Average BPM", f"{avg_bpm}")
-                    st.metric("Overall Average PER", f"{avg_per}")
-                with col2:
-                    st.metric("Times Missing Playoffs", "2" if "Jordan" in player_profile['full_name'] else "4")
-                    st.metric("Losses to Future Champions", "4" if "Jordan" in player_profile['full_name'] else "2")
-                with col3:
-                    st.metric("Wins Per Finals", "4.0" if "Jordan" in player_profile['full_name'] else "2.2")
-                    st.metric("Margin of W/L (Per Finals)", "2.17" if "Jordan" in player_profile['full_name'] else "-1.10")
-
-                st.markdown("### Split Grids: Matchup Ratings")
-                col_a, col_b = st.columns(2)
-                
-                with col_a:
-                    st.markdown("**When Making Finals (Simulated)**")
-                    making_finals_data = {
-                        "Metric": [
-                            "Avg. 1st Rd Opp. Off Rank", "Avg. 1st Rd Opp. Def Rank", "Avg. 1st Rd Series Length",
-                            "Avg. Conf Semi Opp. Off Rank", "Avg. Conf Semi Opp. Def Rank", "Avg. Conf Semi Series Length"
-                        ],
-                        "Value": [
-                            "14.4" if "Jordan" in player_profile['full_name'] else "12.38",
-                            "16.67" if "Jordan" in player_profile['full_name'] else "13.03",
-                            "3.5" if "Jordan" in player_profile['full_name'] else "4.38",
-                            "12.5" if "Jordan" in player_profile['full_name'] else "10.95",
-                            "9.5" if "Jordan" in player_profile['full_name'] else "8.75",
-                            "5.16" if "Jordan" in player_profile['full_name'] else "4.93"
-                        ]
-                    }
-                    st.dataframe(pd.DataFrame(making_finals_data), use_container_width=True)
-
-                with col_b:
-                    st.markdown("**When Missing Finals (Simulated)**")
-                    missing_finals_data = {
-                        "Metric": [
-                            "Avg. 1st Rd Opp. Off Rank", "Avg. 1st Rd Opp. Def Rank", "Avg. 1st Rd Series Length",
-                            "Avg. Conf Semi Opp. Off Rank", "Avg. Conf Semi Opp. Def Rank", "Avg. Conf Semi Series Length"
-                        ],
-                        "Value": [
-                            "8.5" if "Jordan" in player_profile['full_name'] else "12.38",
-                            "5.5" if "Jordan" in player_profile['full_name'] else "12.25",
-                            "4.0" if "Jordan" in player_profile['full_name'] else "5.38",
-                            "4.67" if "Jordan" in player_profile['full_name'] else "14.67",
-                            "15.0" if "Jordan" in player_profile['full_name'] else "9.33",
-                            "5.33" if "Jordan" in player_profile['full_name'] else "5.33"
-                        ]
-                    }
-                    st.dataframe(pd.DataFrame(missing_finals_data), use_container_width=True)
-
-            # --- TAB 3: TEAMMATE CONTEXT ENGINE ---
-            with tab3:
-                st.subheader("Top Teammate Support Profile (Postseason Context)")
-                st.markdown("Narrowed down automatically to top supporting rotation units to prevent API throttling.")
-                
-                conn = sqlite3.connect("nba_historical_data.db")
-                teammate_df = pd.read_sql_query(
-                    "SELECT teammate_name as 'Teammate', season as 'Season', bpm as 'BPM', per as 'PER', ws_48 as 'WS/48', accolades as 'Accolades / Awards' FROM teammate_accolades WHERE player_name=?", 
-                    conn, params=(player_profile['full_name'],)
-                )
-                conn.close()
-                
-                if not teammate_df.empty:
-                    st.dataframe(teammate_df, use_container_width=True)
-                else:
-                    st.info("No explicit local DB records found for this player. Displaying API defaults.")
-                    mock_teammates = {
-                        "Teammate": ["Supporting Core Player A", "Supporting Core Player B"],
-                        "Season": ["All Career Postseasons", "All Career Postseasons"],
-                        "BPM": [1.4, 0.8],
-                        "PER": [16.2, 14.8],
-                        "WS/48": [0.115, 0.095],
-                        "Accolades / Awards": ["All-Star Consideration / Data Logged", "Rotation Bench Core"]
-                    }
-                    st.dataframe(pd.DataFrame(mock_teammates), use_container_width=True)
-
-            # --- TAB 4: DATABASE ADMINISTRATOR SEEDING PORTAL ---
-            with tab4:
-                st.subheader("⚙️ Local Data Editing & Seeding Portal")
-                st.markdown("Upload a CSV or edit the historical baselines below to adjust the underlying data without re-deploying.")
-                
-                conn = sqlite3.connect("nba_historical_data.db")
-                
-                # Fetch Current Tables
-                df_edit_players = pd.read_sql("SELECT * FROM player_advanced_postseason", conn)
-                df_edit_teammates = pd.read_sql("SELECT * FROM teammate_accolades", conn)
-                
-                st.write("**Player Advanced Postseason Metrics**")
-                edited_players = st.data_editor(df_edit_players, num_rows="dynamic", key="players_editor")
-                
-                st.write("**Teammate Accolades & WS/48 Context**")
-                edited_teammates = st.data_editor(df_edit_teammates, num_rows="dynamic", key="teammates_editor")
-                
-                if st.button("Save Database Changes"):
-                    try:
-                        edited_players.to_sql("player_advanced_postseason", conn, if_exists="replace", index=False)
-                        edited_teammates.to_sql("teammate_accolades", conn, if_exists="replace", index=False)
-                        st.success("Database successfully updated and cached!")
-                        st.cache_data.clear() # Clear cache to reflect new local DB changes
-                    except Exception as e:
-                        st.error(f"Error saving to database: {e}")
-                        
-                conn.close()
-
-        else:
-            st.warning("No historical playoff records located under this explicit profile layout from the API.")
+    log_debug(f"Search initiated for term: '{search_term}'", f"Found {len(matched_players)} matches.")
+    
+    if not matched_players:
+        st.error(f"No player matching '{search_term}' could be located in the NBA database.")
     else:
-        st.error("Player profile matching identity could not be pulled from database indexes. Please check spelling.")
+        if len(matched_players) > 1:
+            player_options = {p['full_name']: p for p in matched_players}
+            chosen_name = st.selectbox("Multiple matches found. Select exact profile:", list(player_options.keys()))
+            selected_player = player_options[chosen_name]
+        else:
+            selected_player = matched_players[0]
+            st.success(f"Matched Profile: **{selected_player['full_name']}** (ID: {selected_player['id']}, Active: {selected_player['is_active']})")
+
+# ---------------------------------------------------------
+# DYNAMIC SEASONS & GAME LOG FETCHING ENGINE
+# ---------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def fetch_player_playoff_seasons(player_id, player_name):
+    """Queries career history to locate every season the player made the playoffs."""
+    try:
+        log_debug(f"Requesting PlayerCareerStats for {player_name} (ID: {player_id})")
+        career = playercareerstats.PlayerCareerStats(player_id=player_id, headers=HEADERS, timeout=15)
+        
+        # Safely try accessing the post-season dataframe attribute
+        try:
+            df_post = career.season_totals_post_season.get_data_frame()
+            log_debug("Successfully retrieved 'season_totals_post_season' attribute.")
+        except Exception as attr_err:
+            log_debug(f"Attribute access failed: {attr_err}. Attempting position fallback.")
+            dfs = career.get_data_frames()
+            df_post = dfs[2]  # Position 2 is traditionally SeasonTotalsPostSeason
+            
+        if df_post.empty:
+            log_debug(f"Career postseason totals returned an empty DataFrame for {player_name}.")
+            return [], df_post
+            
+        if 'SEASON_ID' in df_post.columns:
+            seasons = sorted(df_post['SEASON_ID'].unique().tolist())
+            log_debug(f"Discovered {len(seasons)} playoff campaigns:", seasons)
+            return seasons, df_post
+        else:
+            log_debug("SEASON_ID column missing from dataframe structure.", df_post.columns.tolist())
+            return [], df_post
+            
+    except Exception as e:
+        log_debug(f"Fatal exception during career timeline extraction: {str(e)}")
+        return [], pd.DataFrame()
+
+@st.cache_data(show_spinner=False)
+def aggregate_career_playoff_logs(player_id, player_name, seasons):
+    """Sequentially crawls individual playoff logs for explicit active seasons."""
+    if not seasons:
+        return pd.DataFrame()
+        
+    master_logs = []
+    progress_bar = st.progress(0)
+    status_msg = st.empty()
+    
+    for index, season in enumerate(seasons):
+        status_msg.text(f"Crawling game logs for postseason campaign: {season}...")
+        log_debug(f"Dispatching PlayerGameLog request for season {season}")
+        
+        try:
+            gamelog = playergamelog.PlayerGameLog(
+                player_id=player_id,
+                season=season,
+                season_type_all_star='Playoffs',
+                headers=HEADERS,
+                timeout=15
+            )
+            df = gamelog.get_data_frames()[0]
+            
+            if not df.empty:
+                df['SEASON_YEAR'] = season  # Inject human-readable season key
+                master_logs.append(df)
+                log_debug(f"Season {season} complete. Extracted {len(df)} games.")
+            else:
+                log_debug(f"Season {season} returned zero valid game rows.")
+                
+            # Graceful pacing to comply with stats.nba.com security throttling
+            time.sleep(0.6)
+            
+        except Exception as season_err:
+            log_debug(f"Skipped season {season} due to request exception: {str(season_err)}")
+            st.warning(f"Temporary issue parsing stats for season {season}. Review debug log.")
+            
+        progress_bar.progress((index + 1) / len(seasons))
+        
+    status_msg.empty()
+    progress_bar.empty()
+    
+    if master_logs:
+        combined_df = pd.concat(master_logs, ignore_index=True)
+        log_debug(f"Aggregation sequence complete. Unified shape: {combined_df.shape}")
+        return combined_df
+    return pd.DataFrame()
+
+# ---------------------------------------------------------
+# RENDERING ENGINE & ANALYTICS PIPELINE
+# ---------------------------------------------------------
+if selected_player:
+    p_id = selected_player['id']
+    p_name = selected_player['full_name']
+    
+    # Step 1: Discover valid playoff seasons
+    playoff_seasons, raw_career_df = fetch_player_playoff_seasons(p_id, p_name)
+    
+    if not playoff_seasons:
+        st.warning(f"No historical playoff records located under this profile structure. {p_name} has no recorded career NBA postseason appearances.")
+    else:
+        # Step 2: Extract historical playoff game logs
+        with st.spinner(f"Connecting to API to assemble career postseason log for {p_name}..."):
+            playoff_df = aggregate_career_playoff_logs(p_id, p_name, playoff_seasons)
+            
+        if playoff_df.empty:
+            st.error("The API successfully acknowledged the profile's postseason entries, but individual game logs failed to return valid data sheets.")
+        else:
+            # Data Cleaning layer to handle historical tracking discrepancies safely
+            for col in ['PTS', 'AST', 'REB', 'STL', 'BLK', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'MIN']:
+                if col in playoff_df.columns:
+                    playoff_df[col] = pd.to_numeric(playoff_df[col], errors='coerce').fillna(0)
+            
+            # Derive meta metrics
+            if 'MATCHUP' in playoff_df.columns:
+                playoff_df['OPPONENT'] = playoff_df['MATCHUP'].apply(lambda x: x.split(' ')[-1])
+                playoff_df['LOCATION'] = playoff_df['MATCHUP'].apply(lambda x: 'Away' if '@' in x else 'Home')
+            else:
+                playoff_df['OPPONENT'] = "Unknown"
+                playoff_df['LOCATION'] = "Unknown"
+                
+            total_games = len(playoff_df)
+            wins = len(playoff_df[playoff_df['WL'] == 'W']) if 'WL' in playoff_df.columns else 0
+            losses = total_games - wins
+            win_pct = (wins / total_games) * 100 if total_games > 0 else 0
+            
+            # High-level analytical overview metrics
+            st.header(f"📊 {p_name} Postseason Career Analytics")
+            
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Playoff Games Played", f"{total_games}")
+            m2.metric("Postseason Record", f"{wins}W - {losses}L")
+            m3.metric("Playoff Win Percentage", f"{win_pct:.1f}%")
+            m4.metric("Career Playoff PPG", f"{playoff_df['PTS'].mean():.1f}" if 'PTS' in playoff_df.columns else "N/A")
+            
+            # Tabbed Layout Layout
+            tab1, tab2, tab3 = st.tabs(["🔥 Complete Performance Log", "🎯 Series & Opponent Analysis", "📈 Statistical Trajectories"])
+            
+            with tab1:
+                st.subheader("Interactive Career Playoff Logs Explorer")
+                st.markdown("Filter, sort, and look up every post-season game row recorded inside the API structure.")
+                
+                # Interactive filter layout
+                f_cols = st.columns(3)
+                with f_cols[0]:
+                    season_filter = st.multiselect("Filter Seasons:", options=sorted(playoff_df['SEASON_YEAR'].unique()))
+                with f_cols[1]:
+                    opp_filter = st.multiselect("Filter Opponents:", options=sorted(playoff_df['OPPONENT'].unique()))
+                with f_cols[2]:
+                    outcome_filter = st.multiselect("Game Outcome:", options=['W', 'L'])
+                    
+                display_df = playoff_df.copy()
+                if season_filter:
+                    display_df = display_df[display_df['SEASON_YEAR'].isin(season_filter)]
+                if opp_filter:
+                    display_df = display_df[display_df['OPPONENT'].isin(opp_filter)]
+                if outcome_filter:
+                    display_df = display_df[display_df['WL'].isin(outcome_filter)]
+                    
+                st.dataframe(display_df, use_container_width=True)
+                
+            with tab2:
+                st.subheader("Postseason Performance Breakdowns by Matchup Team")
+                
+                # Group stats to identify records against explicit opponents
+                if 'OPPONENT' in playoff_df.columns:
+                    opp_stats = playoff_df.groupby('OPPONENT').agg(
+                        Games=('GAME_ID', 'count'),
+                        PPG=('PTS', 'mean'),
+                        RPG=('REB', 'mean'),
+                        APG=('AST', 'mean')
+                    ).reset_index().round(1)
+                    
+                    st.dataframe(opp_stats.sort_values(by='Games', ascending=False), use_container_width=True)
+                    
+                    fig_opp = px.bar(opp_stats, x='OPPONENT', y='PPG', title=f"Average Points Scored per Game vs Opponents", color='Games', labels={'PPG': 'Points Per Game', 'OPPONENT': 'Opponent Abbreviation'})
+                    st.plotly_chart(fig_opp, use_container_width=True)
+                    
+            with tab3:
+                st.subheader("Playoff Scoring Trajectory Across Career Timeline")
+                if 'GAME_DATE' in playoff_df.columns and 'PTS' in playoff_df.columns:
+                    # Sort oldest to newest for clear visual flow
+                    trajectory_df = playoff_df.copy()
+                    if 'SEASON_YEAR' in trajectory_df.columns:
+                        trajectory_df = trajectory_df.sort_values(by=['SEASON_YEAR', 'GAME_ID'], ascending=[True, True])
+                    trajectory_df['Career Game #'] = range(1, len(trajectory_df) + 1)
+                    
+                    fig_traj = px.line(
+                        trajectory_df, 
+                        x='Career Game #', 
+                        y='PTS', 
+                        hover_data=['SEASON_YEAR', 'MATCHUP', 'PTS', 'WL'],
+                        title=f"{p_name} Game-by-Game Scoring Evolution",
+                        labels={'PTS': 'Points Scored'}
+                    )
+                    st.plotly_chart(fig_traj, use_container_width=True)
+
+# ---------------------------------------------------------
+# SYSTEM DEVELOPER DEBUG CONSOLE
+# ---------------------------------------------------------
+if show_debug_panel:
+    st.markdown("---")
+    with st.expander("🔧 Developer Debug Console (Live System Payloads)", expanded=True):
+        st.markdown("""
+        **Why this matters:** Use this area to audit API responses. If a player lookup returns empty configurations, 
+        this trace indicates if the fault lies inside the static ID matcher, the API season index, or a formatting mismatch.
+        """)
+        
+        col_db1, col_db2 = st.columns(2)
+        with col_db1:
+            st.write("**Active Target Profile Metadata:**")
+            st.json(selected_player if selected_player else {"Status": "No player matched yet."})
+            
+            st.write("**Discovered Postseason Seasons Array:**")
+            st.code(playoff_seasons if 'playoff_seasons' in locals() else [])
+            
+        with col_db2:
+            st.write("**Raw Season History Shape & Columns:**")
+            if 'raw_career_df' in locals() and not raw_career_df.empty:
+                st.write(f"DataFrame Shape: {raw_career_df.shape}")
+                st.write("Column Schema:")
+                st.code(raw_career_df.columns.tolist())
+            else:
+                st.code("No career frame populated.")
+                
+        st.write("**Live System Trace Messages & API Call Logs:**")
+        if st.session_state.debug_logs:
+            for log in reversed(st.session_state.debug_logs):
+                st.text(log)
+        else:
+            st.info("No active API call signals or trace checkpoints recorded.")
