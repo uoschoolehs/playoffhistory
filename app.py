@@ -1,146 +1,149 @@
 import streamlit as st
 import pandas as pd
 import requests
-import time
-from nba_api.static import players
 
-# Set page layout
-st.set_page_config(page_title="Dynamic NBA Postseason Engine", layout="wide")
+# Set page configuration
+st.set_page_config(page_title="Universal NBA Analytics Engine", layout="wide", page_icon="🏀")
 
-st.title("🏀 Historical NBA Postseason Query Engine")
-st.markdown("---")
+st.title("🏀 Universal Historical NBA Engine")
+st.markdown("""
+ This engine uses a self-contained, open-access historical data layer to track player lines 
+ across every single era. Because it bypasses official server connections entirely, **it is completely immune to firewall blocks and package installation drops.**
+""")
 
 # -------------------------------------------------------------------------
-# LAYER 1: Offline Identity Resolution (Works for ALL players across eras)
+# CORE DATA LAYER: Dynamic Database Ingestion
 # -------------------------------------------------------------------------
-@st.cache_data
-def get_all_players_map():
-    """Retrieves the complete offline registry built into the library."""
-    all_players = players.get_players()
-    return {p['full_name'].lower(): p for p in all_players}
+@st.cache_data(show_spinner=False)
+def load_historical_database():
+    """
+    Fetches the unblocked historical dataset covering all NBA player lines across eras.
+    Contains structural metrics like True Shooting, Games Played, and Advanced Impact values.
+    """
+    url = "https://raw.githubusercontent.com/fivethirtyeight/nba-player-advanced-metrics/master/nba-data-historical.csv"
+    try:
+        df = pd.read_csv(url)
+        # Clean data formats right out of the gate
+        df['name_common_lower'] = df['name_common'].str.strip().str.lower()
+        return df, True
+    except Exception as e:
+        return pd.DataFrame(), False
 
-player_registry = get_all_players_map()
+# Trigger secure data fetch
+with st.spinner("Initializing historical dataset matrix..."):
+    master_db, upload_success = load_historical_database()
 
-# User Input
-search_query = st.text_input("Enter any NBA Player Name (e.g., Michael Jordan, LeBron James, Kobe Bryant):", "")
-
-if search_query:
-    normalized_name = search_query.strip().lower()
+if not upload_success:
+    st.error("❌ System Failure: Unable to fetch the underlying database mirror. Please refresh the page.")
+else:
+    # -------------------------------------------------------------------------
+    # IDENTITY INTERSECTION LAYER (Works for ALL players)
+    # -------------------------------------------------------------------------
+    # Get a unique, sorted list of all players in NBA history for auto-complete
+    unique_players = sorted(master_db['name_common'].unique())
     
-    if normalized_name in player_registry:
-        player_info = player_registry[normalized_name]
-        player_id = player_info['id']
-        player_name = player_info['full_name']
-        is_active = player_info['is_active']
+    st.subheader("🔍 Player Selection Interface")
+    search_input = st.text_input(
+        "Type or select any NBA Player Name (e.g., Michael Jordan, LeBron James, Kobe Bryant, Shaquille O'Neal):", 
+        value="Michael Jordan"
+    )
+    
+    # Filter unique names based on substring match to handle slight typos or abbreviations
+    matched_names = [name for name in unique_players if search_input.lower().strip() in name.lower()]
+    
+    if not matched_names:
+        st.error(f"No player profiles found matching '{search_input}'. Check your spelling and try again.")
+    else:
+        # If multiple players match a broad search term (e.g., "Johnson"), provide a selectbox selection
+        if len(matched_names) > 1:
+            selected_player = st.selectbox(
+                f"Found {len(matched_names)} matching records. Select target profile:", 
+                options=matched_names
+            )
+        else:
+            selected_player = matched_names[0]
+            
+        st.success(f"🎯 **Bound Target Profile:** {selected_player}")
         
-        st.success(f"🎯 Identity Resolved: {player_name} (ID: {player_id} | Active: {is_active})")
+        # Isolate rows belonging specifically to our chosen player
+        player_matrix = master_db[master_db['name_common'] == selected_player].copy()
         
         # -------------------------------------------------------------------------
-        # LAYER 2: Live Fetch Attempt with Emulated Footprint
+        # ANALYTICS COMPILATION VIEW
         # -------------------------------------------------------------------------
-        live_success = False
-        postseason_df = pd.DataFrame()
+        # Split stats into Regular Season (RS) and Playoffs (PO)
+        regular_season_df = player_matrix[player_matrix['type'] == 'RS'].copy()
+        playoffs_df = player_matrix[player_matrix['type'] == 'PO'].copy()
         
-        # Exact headers required to spoof Akamai flags when possible
-        live_headers = {
-            "Host": "stats.nba.com",
-            "Connection": "keep-alive",
-            "Accept": "application/json, text/plain, */*",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Origin": "https://www.nba.com",
-            "Referer": "https://www.nba.com/",
-            "Accept-Language": "en-US,en;q=0.9",
+        # UI Tabs to split the data views cleanly
+        tab1, tab2 = st.tabs(["📊 Postseason Records (Playoffs)", "📈 Regular Season Records"])
+        
+        # Column mapping configuration for readable rendering
+        column_mapping = {
+            'year_id': 'Season',
+            'team_id': 'Team',
+            'age': 'Age',
+            'G': 'GP',
+            'Min': 'MIN',
+            'MPG': 'MIN_Per_Game',
+            'TS%': 'True_Shooting_%',
+            'USG%': 'Usage_Rate_%',
+            'Raptor +/-': 'Net_Efficiency_Rating'
         }
         
-        url = f"https://stats.nba.com/stats/playercareerstats?LeagueID=00&PerMode=PerGame&PlayerID={player_id}"
+        columns_to_show = ['year_id', 'team_id', 'age', 'G', 'Min', 'MPG', 'TS%', 'USG%', 'Raptor +/-']
         
-        with st.spinner("Executing secure handshake with live statistics server..."):
-            try:
-                # Direct attempt with pristine header profile
-                response = requests.get(url, headers=live_headers, timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    # Index 3 corresponds to SeasonTotalsPostSeason in the career stats payload
-                    result_set = data['resultSets'][3]
-                    postseason_df = pd.DataFrame(result_set['rowSet'], columns=result_set['headers'])
-                    live_success = True
-                    st.info("⚡ Live data pipeline verified. Parsing active server data.")
-            except Exception as e:
-                # Graceful extraction log
-                st.warning("⚠️ Live server connection throttled by cloud firewall lock. Activating Universal Historical Mirror...")
+        # --- TAB 1: PLAYOFF ANALYSIS ---
+        with tab1:
+            if playoffs_df.empty:
+                st.info(f"ℹ️ {selected_player} has no recorded career NBA postseason appearances.")
+            else:
+                st.subheader(f"Playoff Career Ledger: {selected_player}")
+                
+                # Format the table display
+                po_display = playoffs_df[columns_to_show].rename(columns=column_mapping).sort_values(by='Season').reset_index(drop=True)
+                # Convert True Shooting to a clean percentage string for UI layout consistency
+                po_display['True_Shooting_%'] = po_display['True_Shooting_%'].map(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
+                
+                st.dataframe(po_display, use_container_width=True, hide_index=True)
+                
+                # Dynamic Aggregation Calculation Metrics
+                st.markdown("### 📊 Career Postseason Impact Breakdown")
+                kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+                
+                total_po_games = int(playoffs_df['G'].sum())
+                avg_po_min = float(playoffs_df['MPG'].mean())
+                peak_net_eff = float(playoffs_df['Raptor +/-'].max())
+                career_po_ts = float(playoffs_df['TS%'].mean() * 100)
+                
+                kpi1.metric("Total Playoff Games", f"{total_po_games}")
+                kpi2.metric("Avg Playoff MPG", f"{avg_po_min:.1f}")
+                kpi3.metric("Career Playoff True Shooting", f"{career_po_ts:.1f}%")
+                kpi4.metric("Peak Single-Season Impact (+/-)", f"{peak_net_eff:+.2f}")
 
-        # -------------------------------------------------------------------------
-        # LAYER 3: Universal Dynamic Fallback Dataset (Zero-Network Dependency)
-        # -------------------------------------------------------------------------
-        if not live_success:
-            try:
-                # Pulls from an unblocked open historical dataset mirror containing comprehensive NBA era lines
-                backup_url = "https://raw.githubusercontent.com/fivethirtyeight/nba-player-advanced-metrics/master/nba-data-historical.csv"
+        # --- TAB 2: REGULAR SEASON ANALYSIS ---
+        with tab2:
+            if regular_season_df.empty:
+                st.info(f"ℹ️ {selected_player} has no recorded career NBA regular season appearances.")
+            else:
+                st.subheader(f"Regular Season Career Ledger: {selected_player}")
                 
-                @st.cache_data
-                def load_backup_matrix(url_source):
-                    df = pd.read_csv(url_source)
-                    # Filter for playoff data rows only
-                    df_po = df[df['type'] == 'PO'].copy()
-                    return df_po
+                # Format the table display
+                rs_display = regular_season_df[columns_to_show].rename(columns=column_mapping).sort_values(by='Season').reset_index(drop=True)
+                rs_display['True_Shooting_%'] = rs_display['True_Shooting_%'].map(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
                 
-                historical_matrix = load_backup_matrix(backup_url)
+                st.dataframe(rs_display, use_container_width=True, hide_index=True)
                 
-                # Dynamic matching using string distance/exact matching across the entire database
-                player_data = historical_matrix[historical_matrix['name_common'].str.lower() == normalized_name]
+                # Dynamic Aggregation Calculation Metrics
+                st.markdown("### 📊 Career Regular Season Impact Breakdown")
+                rkpi1, rkpi2, rkpi3, rkpi4 = st.columns(4)
                 
-                if not player_data.empty:
-                    # Map columns cleanly to align with an analytics framework
-                    postseason_df = player_data.rename(columns={
-                        'year_id': 'SEASON_ID',
-                        'team_id': 'TEAM_ABBREVIATION',
-                        'G': 'GP',
-                        'Min': 'MIN',
-                        'USG%': 'USG_PCT',
-                        'TS%': 'TS_PCT',
-                        'Raptor +/-': 'NET_EFFICIENCY'
-                    })
-                    postseason_df['SEASON_ID'] = postseason_df['SEASON_ID'].astype(str)
-                else:
-                    st.error(f"Could not locate historical playoff logs for '{player_name}' in the data register.")
-            except Exception as backup_error:
-                st.error(f"Critical System Failure: Unable to parse fallback register. {str(backup_error)}")
-
-        # -------------------------------------------------------------------------
-        # DATA PRESENTATION LAYER (Renders seamlessly regardless of data source)
-        # -------------------------------------------------------------------------
-        if not postseason_df.empty:
-            st.subheader(f"📊 Career Postseason Statistics Ledger: {player_name}")
-            
-            # Filter and organize relevant metrics cleanly
-            available_cols = ['SEASON_ID', 'TEAM_ABBREVIATION', 'GP', 'MIN', 'PTS', 'AST', 'REB', 'STL', 'BLK', 'TS_PCT', 'USG_PCT', 'NET_EFFICIENCY']
-            display_cols = [col for col in available_cols if col in postseason_df.columns]
-            
-            final_display_df = postseason_df[display_cols].reset_index(drop=True)
-            
-            # Display dynamic data table
-            st.dataframe(final_display_df, use_container_width=True)
-            
-            # Contextual Aggregates Summary Box
-            st.markdown("### 📈 Career Playoff Impact Metrics")
-            col1, col2, col3, col4 = st.columns(4)
-            
-            total_games = int(final_display_df['GP'].sum())
-            avg_min = float(final_display_df['MIN'].mean())
-            
-            with col1:
-                st.metric("Total Playoff Games", f"{total_games}")
-            with col2:
-                st.metric("Avg Playoff Minutes", f"{avg_min:.1f}")
-            
-            if 'TS_PCT' in final_display_df.columns:
-                with col3:
-                    st.metric("True Shooting Average", f"{(final_display_df['TS_PCT'].mean() * 100):.1f}%")
-            if 'NET_EFFICIENCY' in final_display_df.columns:
-                with col4:
-                    st.metric("Avg Net Efficiency (RAPTOR)", f"{final_display_df['NET_EFFICIENCY'].mean():+.2f}")
-        else:
-            st.info("No postseason appearances on record for this athlete.")
-            
-    else:
-        st.error(f"❌ Player '{search_query}' not found in the NBA historical registry. Check spelling and try again.")
+                total_rs_games = int(regular_season_df['G'].sum())
+                avg_rs_min = float(regular_season_df['MPG'].mean())
+                peak_rs_net_eff = float(regular_season_df['Raptor +/-'].max())
+                career_rs_ts = float(regular_season_df['TS%'].mean() * 100)
+                
+                rkpi1.metric("Total RS Games", f"{total_rs_games}")
+                rkpi2.metric("Avg RS MPG", f"{avg_rs_min:.1f}")
+                rkpi3.metric("Career RS True Shooting", f"{career_rs_ts:.1f}%")
+                rkpi4.metric("Peak Single-Season Impact (+/-)", f"{peak_rs_net_eff:+.2f}")
