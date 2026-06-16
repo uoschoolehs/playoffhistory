@@ -25,7 +25,7 @@ st.markdown("""
         margin-top: 15px;
     }
     </style>
-""", unsafe_with_html=True)
+""", unsafe_allow_html=True)
 
 # ==============================================================================
 # IMMUTABLE HISTORICAL ACCLAIM & PLAYOFF RECORD REGISTRY
@@ -160,7 +160,7 @@ df_b = db[db['Player'] == player_b].sort_values(by='Year')
 # ==============================================================================
 # DATA SEGMENT 1: HARDWARE & RECORD SPREADSHEET VIEW
 # ==============================================================================
-st.markdown("<div class='spreadsheet-header'>Section 1: Hardware Achievement & Playoff Scale Ledger</div>", unsafe_with_html=True)
+st.markdown("<div class='spreadsheet-header'>Section 1: Hardware Achievement & Playoff Scale Ledger</div>", unsafe_allow_html=True)
 
 def generate_legacy_row(metric_name, dict_key, is_numeric=True):
     val_a = legacy_registry.get(player_a, {}).get(dict_key, 0 if is_numeric else "N/A")
@@ -195,7 +195,7 @@ st.table(pd.DataFrame(legacy_table_rows).set_index("Evaluation Dimension"))
 # ==============================================================================
 # DATA SEGMENT 2: REGULAR SEASON TOTALS & RADICAL EFFICIENCY LEDGER
 # ==============================================================================
-st.markdown("<div class='spreadsheet-header'>Section 2: Audited Regular Season Career Performance Matrix</div>", unsafe_with_html=True)
+st.markdown("<div class='spreadsheet-header'>Section 2: Audited Regular Season Career Performance Matrix</div>", unsafe_allow_html=True)
 
 def aggregate_audited_career(player_df):
     if player_df.empty:
@@ -260,7 +260,7 @@ st.table(pd.DataFrame(stat_matrix_rows).set_index("Statistical Metric Vector"))
 # ==============================================================================
 # DATA SEGMENT 3: DETAILED YEAR-BY-YEAR LEDGER BREAKDOWN
 # ==============================================================================
-st.markdown("<div class='spreadsheet-header'>Section 3: Granular Season-by-Season Analytical Audit Records</div>", unsafe_with_html=True)
+st.markdown("<div class='spreadsheet-header'>Section 3: Granular Season-by-Season Analytical Audit Records</div>", unsafe_allow_html=True)
 
 def generate_formatted_sheet(player_df):
     sheet = player_df.copy()
