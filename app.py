@@ -34,7 +34,7 @@ st.markdown("""
         font-weight: bold;
     }
     </style>
-""", unsafe_with_html=True)
+""", unsafe_allow_html=True)
 
 
 # ==============================================================================
@@ -269,13 +269,13 @@ if app_mode == "Single Player Deep Dive":
         # Render premium UI stats grid layout
         m_col1, m_col2, m_col3, m_col4 = st.columns(4)
         with m_col1:
-            st.markdown(f"<div class='metric-card'><div class='metric-title'>Career Games</div><div class='metric-value'>{total_g:,}</div></div>", unsafe_with_html=True)
+            st.markdown(f"<div class='metric-card'><div class='metric-title'>Career Games</div><div class='metric-value'>{total_g:,}</div></div>", unsafe_allow_html=True)
         with m_col2:
-            st.markdown(f"<div class='metric-card'><div class='metric-title'>Career PPG</div><div class='metric-value'>{ppg:.1f}</div></div>", unsafe_with_html=True)
+            st.markdown(f"<div class='metric-card'><div class='metric-title'>Career PPG</div><div class='metric-value'>{ppg:.1f}</div></div>", unsafe_allow_html=True)
         with m_col3:
-            st.markdown(f"<div class='metric-card'><div class='metric-title'>Cumulative VORP</div><div class='metric-value'>{total_vorp:.1f}</div></div>", unsafe_with_html=True)
+            st.markdown(f"<div class='metric-card'><div class='metric-title'>Cumulative VORP</div><div class='metric-value'>{total_vorp:.1f}</div></div>", unsafe_allow_html=True)
         with m_col4:
-            st.markdown(f"<div class='metric-card'><div class='metric-title'>True Shooting Average</div><div class='metric-value'>{mean_ts*100:.1f}%</div></div>", unsafe_with_html=True)
+            st.markdown(f"<div class='metric-card'><div class='metric-title'>True Shooting Average</div><div class='metric-value'>{mean_ts*100:.1f}%</div></div>", unsafe_allow_html=True)
 
     with col2:
         st.subheader("🏆 Accolades & All-Time Legacy")
