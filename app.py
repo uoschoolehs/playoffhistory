@@ -42,9 +42,9 @@ st.markdown("""
         font-size: 13px !important;
     }
     </style>
-""", unsafe_with_html=True)
+""", unsafe_allow_html=True)
 
-st.markdown("<div class='spreadsheet-title'>DISSOCIATED post-SEASON ANALYTICAL LEDGER Engine</div>", unsafe_with_html=True)
+st.markdown("<div class='spreadsheet-title'>DISSOCIATED post-SEASON ANALYTICAL LEDGER Engine</div>", unsafe_allow_html=True)
 st.write("Programmatic reconstruction of the evaluation frameworks defined in *Lebron_MJ Comparisons - Sheet1_2.pdf*.")
 
 # ==============================================================================
@@ -325,7 +325,7 @@ metrics_2 = calculate_spreadsheet_metrics(p2_seasons, topo_2)
 # ==============================================================================
 # SPREADSHEET RENDER: SECTION 1 OVERALL METRIC COMBINATION
 # ==============================================================================
-st.markdown("<div class='section-banner'>Metric Overview (Overall, made or missed finals)</div>", unsafe_with_html=True)
+st.markdown("<div class='section-banner'>Metric Overview (Overall, made or missed finals)</div>", unsafe_allow_html=True)
 
 overall_rows = [
     {
@@ -365,7 +365,7 @@ st.table(pd.DataFrame(overall_rows).set_index("Metric Sheet Line"))
 # ==============================================================================
 # SPREADSHEET RENDER: SECTION 2 SPLIT CRITERIA (WHEN MAKING FINALS)
 # ==============================================================================
-st.markdown("<div class='section-banner'>Metrics when Making Finals (Averages)</div>", unsafe_with_html=True)
+st.markdown("<div class='section-banner'>Metrics when Making Finals (Averages)</div>", unsafe_allow_html=True)
 
 making_finals_rows = [
     {"Postseason Split Metric": "1st Rnd Opponent Offense Position", f"{player_1}": f"{metrics_1['MF_1R_Off']:.2f}", f"{player_2}": f"{metrics_2['MF_1R_Off']:.2f}"},
@@ -383,7 +383,7 @@ st.table(pd.DataFrame(making_finals_rows).set_index("Postseason Split Metric"))
 # ==============================================================================
 # SPREADSHEET RENDER: SECTION 3 SPLIT CRITERIA (WHEN MISSING FINALS)
 # ==============================================================================
-st.markdown("<div class='section-banner'>Metrics when Missing Finals (Excluding missed playoff years)</div>", unsafe_with_html=True)
+st.markdown("<div class='section-banner'>Metrics when Missing Finals (Excluding missed playoff years)</div>", unsafe_allow_html=True)
 
 missing_finals_rows = [
     {"Postseason Split Metric": "1st Rnd Opponent Offense Position", f"{player_1}": f"{metrics_1['MSF_1R_Off']:.2f}", f"{player_2}": f"{metrics_2['MSF_1R_Off']:.2f}"},
@@ -401,7 +401,7 @@ st.table(pd.DataFrame(missing_finals_rows).set_index("Postseason Split Metric"))
 # ==============================================================================
 # AUDITING DEBUG PORT: EXACT CITATION SOURCE PIPELINE LOGS
 # ==============================================================================
-st.markdown("<div class='section-banner'>🛠️ Code-Level Debugging Ledger & Data Source Citations</div>", unsafe_with_html=True)
+st.markdown("<div class='section-banner'>🛠️ Code-Level Debugging Ledger & Data Source Citations</div>", unsafe_allow_html=True)
 st.write("Use this raw matrix log to map the exact provenance of statistical calculations to prevent mismatches.")
 
 debug_col1, debug_col2 = st.columns(2)
