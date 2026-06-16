@@ -32,7 +32,7 @@ st.markdown("""
         font-size: 1.1rem;
     }
     </style>
-""", unsafe_with_html=True)
+""", unsafe_allow_html=True)
 
 # ==============================================================================
 # MODULE 2: VERIFIED DATA EXTENSION LAYER (2018 - 2026)
@@ -226,7 +226,7 @@ if m1 and m2:
     v_col1, v_col2 = st.columns(2)
     
     with v_col1:
-        st.markdown(f"<div class='spreadsheet-header'>{player_1} Legacy Ledger</div>", unsafe_with_html=True)
+        st.markdown(f"<div class='spreadsheet-header'>{player_1} Legacy Ledger</div>", unsafe_allow_html=True)
         if player_1 in historical_vault:
             vault = historical_vault[player_1]
             st.markdown(f"🏆 **Championship Log:** {vault['Championships']}")
@@ -240,7 +240,7 @@ if m1 and m2:
             st.markdown("*Manual text archive mapping not configured for this specific custom index query node.*")
 
     with v_col2:
-        st.markdown(f"<div class='spreadsheet-header'>{player_2} Legacy Ledger</div>", unsafe_with_html=True)
+        st.markdown(f"<div class='spreadsheet-header'>{player_2} Legacy Ledger</div>", unsafe_allow_html=True)
         if player_2 in historical_vault:
             vault = historical_vault[player_2]
             st.markdown(f"🏆 **Championship Log:** {vault['Championships']}")
